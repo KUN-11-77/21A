@@ -173,6 +173,18 @@ Progress:
 - Updated [cmsis_dsp_empty.c](cmsis_dsp_empty.c) to match the TI example pattern for the isolation test: repeat-single ADC with auto sampling, explicit DMA channel disable before setup, DMA repeat-single transfer mode, cleared ADC DMA_DONE status, and explicit `DL_ADC12_enableDMA()` before starting conversion.
 - Rebuilt the patched ADC+DMA isolation firmware successfully with TI Arm Clang.
 - Flashed and verified the patched ADC+DMA isolation firmware. Runtime readback confirmed `gADCDMADone = 1`, `ADC0_CPU_INT_IIDX = 0x00000006` (`DMA_DONE`), `ADC0_CPU_INT_MIS = 0x00000020`, and the first sample buffer words were non-zero ADC values such as `0x0233`, `0x022F`, `0x0234`, and `0x0236`.
+- For FFT input, switched the runtime path back from software-triggered ADC isolation to timer-paced sampling: `TIMER_0` zero event publishes on event channel 1, `ADC12_0` subscribes on channel 1, ADC0 performs one conversion per timer event, and DMA channel 0 captures 1024 half-word samples before ADC DMA_DONE.
+- Rebuilt the timer-event ADC+DMA firmware successfully with TI Arm Clang.
+- Flashed the first timer-event ADC+DMA firmware. Runtime readback confirmed the event path itself was now connected (`TIMA0_FPUB0 = 1`, `TIMA0_GEN_EVENT0_IMASK = 1`, `ADC0_FSUB0 = 1`) and DMA advanced by one half-word (`DMADA = 0x20200002`, `DMASZ = 0x000003FF`), but `gADCDMADone` stayed 0. This showed ADC event triggering worked once, but ADC was not staying armed for repeated timer events.
+- Updated ADC0 to `DL_ADC12_REPEAT_MODE_ENABLED` while keeping `DL_ADC12_TRIG_SRC_EVENT`, so repeated `TIMER_0` zero events can fill the full 1024-sample DMA block.
+- Rebuilt the repeat event-triggered ADC+DMA firmware successfully with TI Arm Clang.
+- Flashed and checked the repeat event-triggered firmware. `gADCDMADone = 1`, ADC CPU interrupt index was `0x00000006` (`DMA_DONE`), and both the beginning and end of `gADCSamples` contained non-zero ADC values. However, DMA registers showed the channel had already started a later pass through the buffer (`DMADA = 0x20200476`, `DMASZ = 0x0000014E`), so the timer needed to be stopped at DMA_DONE to freeze an FFT frame.
+- Updated the ADC DMA_DONE ISR to stop `TIMER_0`, disable DMA channel 0, and disable ADC DMA before setting `gADCDMADone`, so the 1024-sample frame remains stable for FFT processing.
+- Rebuilt the DMA_DONE frame-freeze firmware successfully with TI Arm Clang.
+- Flashed and checked the frame-freeze firmware. It still showed a few samples of next-frame overwrite before the ISR disabled the peripherals (`DMADA = 0x20200008`, `DMASZ = 0x000003FC`). DriverLib documentation clarified that `DL_DMA_SINGLE_TRANSFER_MODE` is the correct mode for "one data transfer per DMA trigger, `DMASZ` triggers until block done"; the earlier one-sample behavior came from ADC non-repeat mode, not DMA single mode.
+- Updated DMA channel 0 to `DL_DMA_SINGLE_TRANSFER_MODE` while keeping ADC repeat event mode and the DMA_DONE frame-freeze ISR.
+- Rebuilt the DMA single-transfer + ADC repeat-event firmware successfully with TI Arm Clang.
+- Flashed and verified the final timer-event ADC+DMA capture firmware. Runtime readback confirmed `gADCDMADone = 1`, `TIMA0_FPUB0 = 1`, `ADC0_FSUB0 = 1`, `DMADA = 0x20200800`, `DMASZ = 0`, and both the beginning and end of `gADCSamples` contained non-zero ADC data. This confirms `TIMER_0` event-triggered ADC sampling filled exactly one 1024-point DMA frame and stopped without starting the next frame.
 
 Difficulties:
 
@@ -182,7 +194,7 @@ Difficulties:
 
 Next step:
 
-- ADC+DMA is validated with the software-triggered isolation path. Next, restore or fix the TIMER publisher to ADC subscriber event path so sampling is timer-paced instead of software-started.
+- ADC+DMA is validated with `TIMER_0` event-triggered sampling and a frozen 1024-sample frame. Next, add the CMSIS-DSP FFT processing path over `gADCSamples` after `gADCDMADone` becomes true.
 
 ## Action Log
 
@@ -205,3 +217,15 @@ Next step:
 | 2026-07-07 15:26 | Compared against TI SDK ADC DMA examples and patched firmware | Switched the isolation test toward the TI pattern: ADC auto sampling, DMA repeat-single transfer mode, clear DMA_DONE, and re-enable ADC DMA before start. |
 | 2026-07-07 15:29 | Rebuilt patched ADC+DMA isolation firmware | Build succeeded with `tiarmclang.exe` and regenerated `Debug/cmsis_dsp_empty_LP_MSPM0G3507_nortos_ticlang.out`. |
 | 2026-07-07 15:32 | Flashed and checked patched ADC+DMA isolation firmware | Flash/verify/run succeeded; `gADCDMADone` became 1, ADC CPU interrupt index reported DMA_DONE, and `gADCSamples` contained non-zero ADC data. |
+| 2026-07-07 15:59 | Switched runtime path back to TIMER event-triggered ADC for FFT sampling | Patched [cmsis_dsp_empty.c](cmsis_dsp_empty.c) so `TIMER_0` publishes zero events on channel 1, ADC0 subscribes on channel 1, and DMA still captures 1024 samples before ADC DMA_DONE. |
+| 2026-07-07 15:59 | Rebuilt timer-event ADC+DMA firmware | Build succeeded with `tiarmclang.exe` and regenerated the `.out` for flashing. |
+| 2026-07-07 16:03 | Flashed and checked first timer-event ADC+DMA firmware | Event channel setup was correct and one sample transfer occurred, but ADC was not configured for repeated event-triggered conversions, so DMA did not reach 1024 samples. |
+| 2026-07-07 16:03 | Enabled repeated event-triggered ADC conversions | Changed ADC0 from single event conversion to repeat event conversion so the timer can drive the full 1024-sample DMA capture. |
+| 2026-07-07 16:04 | Rebuilt repeat event-triggered ADC+DMA firmware | Build succeeded with `tiarmclang.exe`. |
+| 2026-07-07 16:07 | Flashed and checked repeat event-triggered ADC+DMA firmware | DMA_DONE occurred and the buffer contained non-zero samples, but the timer kept running after DMA_DONE and DMA began overwriting the next frame. |
+| 2026-07-07 16:07 | Added DMA_DONE frame freeze logic | ADC DMA_DONE ISR now stops `TIMER_0`, disables DMA channel 0, disables ADC DMA, and then sets `gADCDMADone`. |
+| 2026-07-07 16:08 | Rebuilt DMA_DONE frame-freeze firmware | Build succeeded with `tiarmclang.exe`. |
+| 2026-07-07 16:11 | Checked frame-freeze firmware and DMA mode semantics | DMA_DONE occurred, but repeat-single DMA mode could start a next frame before ISR shutdown; decided to use `DL_DMA_SINGLE_TRANSFER_MODE` with ADC repeat event mode. |
+| 2026-07-07 16:11 | Switched DMA channel 0 to single transfer mode | Kept one half-word per ADC DMA trigger and 1024 triggers per frame, but removed automatic full-channel repeat. |
+| 2026-07-07 16:12 | Rebuilt DMA single-transfer + ADC repeat-event firmware | Build succeeded with `tiarmclang.exe`. |
+| 2026-07-07 16:14 | Flashed and verified final timer-event ADC+DMA capture firmware | `gADCDMADone` became 1, DMA stopped at `DMADA = 0x20200800` with `DMASZ = 0`, and the 1024-sample buffer contained non-zero data at both the beginning and end. |
