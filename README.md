@@ -163,6 +163,7 @@ Progress:
 - Added ADC+DMA runtime logic in [cmsis_dsp_empty.c](cmsis_dsp_empty.c): sample buffer, DMA source/destination setup, DMA enable, ADC start, and DMA-done interrupt flag.
 - Read ADC/DMA/TIMA0 registers through DSLite to inspect runtime state.
 - Rebuilt the current ADC+DMA application successfully with TI Arm Clang.
+- Flashed and ran the ADC+DMA application again. Flash verify and `Running... Success` passed; runtime readback showed DMA channel source/destination/enable registers configured, but `gADCDMADone` remained `false` and the first ADC sample buffer values were still zero.
 
 Difficulties:
 
@@ -172,7 +173,7 @@ Difficulties:
 
 Next step:
 
-- Rebuild and flash the current ADC+DMA application, then confirm whether execution reaches `__BKPT(0)` and whether `gADCSamples` contains nonzero or changing ADC data.
+- Fix the ADC trigger path so ADC0 produces DMA trigger events. Current evidence indicates DMA channel setup is present, but ADC DMA raw status remains zero and no samples are copied into `gADCSamples`.
 
 ## Action Log
 
@@ -187,3 +188,4 @@ Next step:
 | 2026-07-07 | Added project README notes and `.gitignore` | Repository documentation prepared before git initialization. |
 | 2026-07-07 | Rebuilt current ADC+DMA application | Build and link succeeded with `tiarmclang.exe`. |
 | 2026-07-07 | Initialized Git repository | Created local git history and prepared initial tracked file set. |
+| 2026-07-07 | Flashed and checked current ADC+DMA firmware | Flash/verify/run succeeded; DMA registers were configured, but ADC DMA completion did not occur. |
