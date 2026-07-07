@@ -164,6 +164,7 @@ Progress:
 - Read ADC/DMA/TIMA0 registers through DSLite to inspect runtime state.
 - Rebuilt the current ADC+DMA application successfully with TI Arm Clang.
 - Flashed and ran the ADC+DMA application again. Flash verify and `Running... Success` passed; runtime readback showed DMA channel source/destination/enable registers configured, but `gADCDMADone` remained `false` and the first ADC sample buffer values were still zero.
+- Rebuilt and flashed the version that starts `TIMER_0_INST`. Runtime readback confirmed TIMA0 is now counting, but ADC DMA raw status is still zero and `gADCDMADone` is still false.
 
 Difficulties:
 
@@ -173,7 +174,7 @@ Difficulties:
 
 Next step:
 
-- Fix the ADC trigger path so ADC0 produces DMA trigger events. Current evidence indicates DMA channel setup is present, but ADC DMA raw status remains zero and no samples are copied into `gADCSamples`.
+- Fix the TIMER publisher to ADC subscriber event path. Current evidence indicates TIMA0 is running and DMA channel setup is present, but `TIMA0_FPUB1` is zero, ADC DMA raw status remains zero, and no samples are copied into `gADCSamples`.
 
 ## Action Log
 
@@ -189,3 +190,4 @@ Next step:
 | 2026-07-07 | Rebuilt current ADC+DMA application | Build and link succeeded with `tiarmclang.exe`. |
 | 2026-07-07 | Initialized Git repository | Created local git history and prepared initial tracked file set. |
 | 2026-07-07 | Flashed and checked current ADC+DMA firmware | Flash/verify/run succeeded; DMA registers were configured, but ADC DMA completion did not occur. |
+| 2026-07-07 | Flashed TIMER-start firmware and checked runtime state | Flash/verify/run succeeded; TIMA0 counter advanced, but ADC DMA trigger/completion still did not occur. |
