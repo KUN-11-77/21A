@@ -45,8 +45,34 @@ int main(void)
     SYSCFG_DL_init();
 
     /*
+     * For this standalone ADC+DMA test, use the same repeat-single software
+     * trigger style as TI's ADC DMA examples. This isolates ADC+DMA from the
+     * TIMER event path while keeping the ADC sample timer in control.
+     */
+    DL_ADC12_disableConversions(ADC12_0_INST);
+    DL_ADC12_initSingleSample(ADC12_0_INST,
+        DL_ADC12_REPEAT_MODE_ENABLED,
+        DL_ADC12_SAMPLING_SOURCE_AUTO,
+        DL_ADC12_TRIG_SRC_SOFTWARE,
+        DL_ADC12_SAMP_CONV_RES_12_BIT,
+        DL_ADC12_SAMP_CONV_DATA_FORMAT_UNSIGNED);
+    DL_ADC12_configConversionMem(ADC12_0_INST, ADC12_0_ADCMEM_0,
+        DL_ADC12_INPUT_CHAN_0,
+        DL_ADC12_REFERENCE_VOLTAGE_VDDA,
+        DL_ADC12_SAMPLE_TIMER_SOURCE_SCOMP0,
+        DL_ADC12_AVERAGING_MODE_DISABLED,
+        DL_ADC12_BURN_OUT_SOURCE_DISABLED,
+        DL_ADC12_TRIGGER_MODE_AUTO_NEXT,
+        DL_ADC12_WINDOWS_COMP_MODE_DISABLED);
+    DL_ADC12_enableConversions(ADC12_0_INST);
+
+    /*
      * DMA 源地址：ADC MEMRES0
      */
+    DL_DMA_disableChannel(DMA, DMA_CH0_CHAN_ID);
+    DL_DMA_setTransferMode(
+        DMA, DMA_CH0_CHAN_ID, DL_DMA_FULL_CH_REPEAT_SINGLE_TRANSFER_MODE);
+
     DL_DMA_setSrcAddr(
         DMA,
         DMA_CH0_CHAN_ID,
@@ -79,22 +105,20 @@ int main(void)
     /*
      * 开 ADC 中断，用来接收 DMA_DONE
      */
+    DL_ADC12_clearInterruptStatus(ADC12_0_INST, DL_ADC12_INTERRUPT_DMA_DONE);
+    DL_ADC12_enableInterrupt(ADC12_0_INST, DL_ADC12_INTERRUPT_DMA_DONE);
     NVIC_EnableIRQ(ADC12_0_INST_INT_IRQN);
 
     gADCDMADone = false;
 
     /*
-     * 启动 ADC
-     * 如果你是软件触发 ADC，用这一句。
+     * TIMER trigger path is intentionally disabled for software-triggered
+     * ADC+DMA validation. Keep the command here for the TIMER event test.
      */
-    DL_ADC12_startConversion(ADC12_0_INST);
+    // DL_TimerA_startCounter(TIMER_0_INST);
 
-    /*
-     * 如果你是 TIMA0 触发 ADC，则上面那句可能不用，
-     * 改成启动定时器：
-     *
-     * DL_TimerA_startCounter(TIMER_0_INST);
-     */
+    DL_ADC12_enableDMA(ADC12_0_INST);
+    DL_ADC12_startConversion(ADC12_0_INST);
 
     while (gADCDMADone == false) {
         __WFE();

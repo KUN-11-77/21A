@@ -140,7 +140,8 @@ Important addresses used during inspection:
 | `ADC0_CTL0` | `0x40001100` | ADC control |
 | `ADC0_DMA_IMASK` | `0x40001088` | ADC DMA trigger mask |
 | `ADC0_DMA_RIS` | `0x40001090` | ADC DMA raw event status |
-| `ADC0_MEMRES0` | `0x40001280` | ADC result memory 0 |
+| `ADC0_MEMRES0` | `0x40001280` | ADC result memory 0 register view |
+| `ADC0_MEMRES0_SVT` | `0x40556280` | ADC result memory 0 SVT address returned by `DL_ADC12_getMemResultAddress()` and used as DMA source |
 | `DMA_CH0_DMACTL` | `0x4042B200` | DMA channel 0 control |
 | `DMA_CH0_DMASA` | `0x4042B204` | DMA source address |
 | `DMA_CH0_DMADA` | `0x4042B208` | DMA destination address |
@@ -165,6 +166,13 @@ Progress:
 - Rebuilt the current ADC+DMA application successfully with TI Arm Clang.
 - Flashed and ran the ADC+DMA application again. Flash verify and `Running... Success` passed; runtime readback showed DMA channel source/destination/enable registers configured, but `gADCDMADone` remained `false` and the first ADC sample buffer values were still zero.
 - Rebuilt and flashed the version that starts `TIMER_0_INST`. Runtime readback confirmed TIMA0 is now counting, but ADC DMA raw status is still zero and `gADCDMADone` is still false.
+- Read the current progress notes and inspected the working-tree diff. The active local test version reconfigures ADC0 to software-triggered repeat-single conversion so ADC+DMA can be debugged separately from the TIMER event path.
+- Ran the documented CCS Theia build command from `Debug/`; `gmake` reported the current `.out` was already up to date for this local test version.
+- Flashed the software-triggered ADC+DMA isolation firmware. Flash verify/run succeeded, but runtime readback showed `gADCDMADone = 0`, the first `gADCSamples` words were still zero, `ADC0_CPU_INT_RIS = 0x00000002` (`TOVIFG`), `ADC0_CPU_INT_MIS = 0`, `ADC0_DMA_TRIG_RIS = 0`, `ADC0_CTL1 = 0x00120100`, `ADC0_CTL2 = 0x00000900`, and `ADC0_STATUS = 0x1`.
+- Compared against TI SDK ADC DMA examples under `D:\diansaiapp\CCS\mspm0_sdk_2_10_00_04\examples\nortos\LP_MSPM0G3507`. The examples use software trigger with ADC auto sampling and DMA `DL_DMA_FULL_CH_REPEAT_SINGLE_TRANSFER_MODE`, while this project had been using manual sampling plus generated `DL_DMA_SINGLE_TRANSFER_MODE`.
+- Updated [cmsis_dsp_empty.c](cmsis_dsp_empty.c) to match the TI example pattern for the isolation test: repeat-single ADC with auto sampling, explicit DMA channel disable before setup, DMA repeat-single transfer mode, cleared ADC DMA_DONE status, and explicit `DL_ADC12_enableDMA()` before starting conversion.
+- Rebuilt the patched ADC+DMA isolation firmware successfully with TI Arm Clang.
+- Flashed and verified the patched ADC+DMA isolation firmware. Runtime readback confirmed `gADCDMADone = 1`, `ADC0_CPU_INT_IIDX = 0x00000006` (`DMA_DONE`), `ADC0_CPU_INT_MIS = 0x00000020`, and the first sample buffer words were non-zero ADC values such as `0x0233`, `0x022F`, `0x0234`, and `0x0236`.
 
 Difficulties:
 
@@ -174,7 +182,7 @@ Difficulties:
 
 Next step:
 
-- Fix the TIMER publisher to ADC subscriber event path. Current evidence indicates TIMA0 is running and DMA channel setup is present, but `TIMA0_FPUB1` is zero, ADC DMA raw status remains zero, and no samples are copied into `gADCSamples`.
+- ADC+DMA is validated with the software-triggered isolation path. Next, restore or fix the TIMER publisher to ADC subscriber event path so sampling is timer-paced instead of software-started.
 
 ## Action Log
 
@@ -191,3 +199,9 @@ Next step:
 | 2026-07-07 | Initialized Git repository | Created local git history and prepared initial tracked file set. |
 | 2026-07-07 | Flashed and checked current ADC+DMA firmware | Flash/verify/run succeeded; DMA registers were configured, but ADC DMA completion did not occur. |
 | 2026-07-07 | Flashed TIMER-start firmware and checked runtime state | Flash/verify/run succeeded; TIMA0 counter advanced, but ADC DMA trigger/completion still did not occur. |
+| 2026-07-07 15:03 | Read current progress and checked local diff | Confirmed the active working-tree firmware isolates ADC+DMA with software-triggered repeat-single ADC conversion. |
+| 2026-07-07 15:03 | Ran documented build command | `gmake` reported `cmsis_dsp_empty_LP_MSPM0G3507_nortos_ticlang.out` is up to date. |
+| 2026-07-07 15:04 | Flashed software-triggered ADC+DMA isolation firmware | Flash/verify/run succeeded, but runtime state showed ADC `TOVIFG`, no ADC DMA_DONE, no DMA trigger status, and an unchanged zero sample buffer. |
+| 2026-07-07 15:26 | Compared against TI SDK ADC DMA examples and patched firmware | Switched the isolation test toward the TI pattern: ADC auto sampling, DMA repeat-single transfer mode, clear DMA_DONE, and re-enable ADC DMA before start. |
+| 2026-07-07 15:29 | Rebuilt patched ADC+DMA isolation firmware | Build succeeded with `tiarmclang.exe` and regenerated `Debug/cmsis_dsp_empty_LP_MSPM0G3507_nortos_ticlang.out`. |
+| 2026-07-07 15:32 | Flashed and checked patched ADC+DMA isolation firmware | Flash/verify/run succeeded; `gADCDMADone` became 1, ADC CPU interrupt index reported DMA_DONE, and `gADCSamples` contained non-zero ADC data. |
