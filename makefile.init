@@ -1,0 +1,10 @@
+################################################################################
+# Project-local make initialization.
+#
+# A system cmd.exe AutoRun entry prints "Active code page: 65001" when SysConfig
+# is invoked. CCS can mis-detect that "65001" token as a generated file and add
+# it to Debug/subdir_vars.mk as an order-only prerequisite. Creating this marker
+# keeps GNU make on the TI compiler rule instead of falling back to built-in cc.
+################################################################################
+
+$(file >65001,)
