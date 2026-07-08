@@ -2,16 +2,23 @@
 #include "ti_msp_dl_config.h"
 
 /*
- * TIMER_0 is configured for a nominal 40.96 kHz frame rate, but this board's
- * clock measured against a known 1 kHz square wave is about 41.479 kHz.
+ * Fs = 32 MHz / (14 + 1) = 2.133333 MS/s.
+ * This keeps the 10th harmonic of a 100 kHz fundamental below Nyquist.
  */
-#define ADC_DMA_SAMPLE_RATE_HZ 41479.1f
+#define ADC_DMA_TIMER_CLOCK_HZ 32000000.0f
+#define ADC_DMA_TIMER_LOAD_VALUE 14U
+#define ADC_DMA_SAMPLE_RATE_HZ \
+    (ADC_DMA_TIMER_CLOCK_HZ / ((float) (ADC_DMA_TIMER_LOAD_VALUE + 1U)))
 
 static volatile uint16_t gADCSamples[ADC_SAMPLE_SIZE];
 static volatile bool gADCDMADone = false;
 
 void ADC_DMA_Init(void)
 {
+    DL_TimerA_stopCounter(TIMER_0_INST);
+    DL_TimerA_setLoadValue(TIMER_0_INST, ADC_DMA_TIMER_LOAD_VALUE);
+    DL_TimerA_setTimerCount(TIMER_0_INST, 0U);
+
     DL_ADC12_disableConversions(ADC12_0_INST);
 
     /*

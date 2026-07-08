@@ -116,10 +116,10 @@ The current application configures:
 
 - ADC0, channel 0, input pin `PA27`
 - DMA channel 0
-- 40.96 kHz timer-paced sampling from `TIMER_0`
+- 2.133333 MS/s timer-paced sampling from `TIMER_0`
 - 2048 half-word samples into `gADCSamples`
-- 2048-point CMSIS-DSP CFFT with 20 Hz bin spacing
-- H1 through H10 extraction around the expected 1 kHz harmonic bins
+- 2048-point CMSIS-DSP CFFT with about 1.0417 kHz bin spacing
+- True fundamental detection, harmonic-frequency tracking, and H1 through H10 neighborhood-energy extraction
 - THD percentage exported through debug watch variables
 - ADC min/max/mean and clipping diagnostics
 - Result-valid and error-flag diagnostics for field debugging
@@ -136,7 +136,8 @@ Useful runtime checks:
 - Watch `gADCSamples[0..2047]` in CCS Expressions/Memory Browser.
 - Watch `gDebugAdcMin`, `gDebugAdcMax`, `gDebugAdcMean`, and `gDebugAdcClipped` to verify front-end bias, amplitude, and clipping margin.
 - Watch `gDebugResultValid` and `gDebugErrorFlags`; `gDebugResultValid` should be `true` for a usable THD result.
-- Watch `gDebugH1Bin`; with a clean 1 kHz sine, it should be close to bin 50.
+- Watch `gDebugPeakFreqHz`, `gDebugBaseFreqHz`, and `gDebugTimeFreqHz`; with a clean 100 kHz-capable input path, they should track the actual fundamental.
+- Watch `gDebugH1Bin` through `gDebugH10Bin`; with a 100 kHz fundamental at 2.133333 MS/s, H10 is still below Nyquist.
 
 DSLite can also read hardware registers directly. Examples:
 
@@ -208,7 +209,7 @@ Difficulties:
 
 Next step:
 
-- The formal firmware path is now `TIMER_0` event-triggered ADC sampling at 40.96 kHz, a frozen 2048-sample DMA frame, 2048-point CMSIS-DSP CFFT, H1-H10 extraction, and THD calculation. Next, validate `H1Bin ~= 50` with a clean 1 kHz sine input, then validate THD with controlled harmonic test signals.
+- The formal firmware path is now `TIMER_0` event-triggered ADC sampling at 2.133333 MS/s, a frozen 2048-sample DMA frame, 2048-point CMSIS-DSP CFFT, true fundamental detection, H1-H10 harmonic tracking, and THD calculation. Next, validate the analog front end can pass the requested high-frequency fundamentals and harmonics without clipping or bandwidth roll-off.
 
 ## Action Log
 

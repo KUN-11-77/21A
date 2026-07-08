@@ -49,7 +49,7 @@ SYSCTL.clockTreeEn = true;
 TIMER1.$name                  = "TIMER_0";
 TIMER1.timerMode              = "PERIODIC_UP";
 TIMER1.event1PublisherChannel = 1;
-TIMER1.timerPeriod            = "24.414 us";
+TIMER1.timerPeriod            = "0.46875 us";
 
 ProjectConfig.genLibCMSIS = true;
 

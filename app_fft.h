@@ -22,7 +22,7 @@
 #endif
 
 #ifndef FFT_SEARCH_HALF_WIDTH
-#define FFT_SEARCH_HALF_WIDTH 3U
+#define FFT_SEARCH_HALF_WIDTH 2U
 #endif
 
 #ifndef FFT_MIN_BASE_FREQ_HZ
@@ -30,7 +30,7 @@
 #endif
 
 #ifndef FFT_MAX_BASE_FREQ_HZ
-#define FFT_MAX_BASE_FREQ_HZ 10000.0f
+#define FFT_MAX_BASE_FREQ_HZ 100000.0f
 #endif
 
 void FFT_Process(volatile uint16_t *adcBuffer);

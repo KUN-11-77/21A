@@ -209,9 +209,11 @@ static void App_GenerateSyntheticInput(volatile uint16_t *adcBuffer)
     const float h2Ratio = 0.10f;
     const float h3Ratio = 0.05f;
     const float twoPi = 6.28318530718f;
+    const float syntheticFreqHz = 1000.0f;
+    const float sampleRateHz = ADC_DMA_GetSampleRateHz();
 
     for (uint32_t i = 0U; i < ADC_SAMPLE_SIZE; i++) {
-        float phase = twoPi * ((float) i) / 40.96f;
+        float phase = twoPi * syntheticFreqHz * ((float) i) / sampleRateHz;
         float sample =
             dcOffset +
             fundamentalAmp * arm_sin_f32(phase) +

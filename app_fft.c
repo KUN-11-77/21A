@@ -174,7 +174,7 @@ uint32_t FFT_GetExpectedHarmonicBin(uint32_t harmonic)
         return 0U;
     }
 
-    return gBaseBin * harmonic;
+    return FFT_GetHarmonicCenterBin(harmonic);
 }
 
 uint32_t FFT_GetHarmonicSearchHalfWidth(void)
