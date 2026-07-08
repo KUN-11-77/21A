@@ -55,6 +55,18 @@ volatile uint32_t gDebugFrameCounter;
 volatile uint32_t gDebugSampleMode;
 volatile bool gDebugAdaptiveLowModeUsed;
 
+/* Measurement session tracking for the 'start measurement' button (ID 16).
+ * Per contest requirement (说明 6):
+ *   - Before button press: display shows default placeholders, no live data
+ *   - On press: start measurement, live values refresh every frame
+ *   - During the 10-s window: button-locked (no page switching)
+ *   - After 10 s: result is final, buttons become active again
+ *   - Total time > 30 s: testing stops (handled by external evaluator) */
+volatile uint32_t gDebugMeasureSessionStart;     /* frame counter at button press */
+volatile uint32_t gDebugMeasureSessionFrames;    /* frames elapsed since press */
+volatile bool     gDebugMeasureSessionActive;    /* true while measuring */
+volatile bool     gDebugMeasureSessionDone;      /* true after 10-s window */
+
 static void App_RunMeasurementFrame(void);
 static void App_CaptureFrame(void);
 static void App_UpdateAdcWatchVariables(volatile uint16_t *adcBuffer);
@@ -475,6 +487,17 @@ static void App_RefreshMainPage(void)
 {
     char buf[24];
 
+    /* If no measurement session has been started yet, show placeholder
+     * defaults rather than live values (per contest requirement 6:
+     * "一键启动测量后才显示测量值"). */
+    if (!gDebugMeasureSessionActive && !gDebugMeasureSessionDone) {
+        TFT_UpdateText(TFT_PAGE_MAIN, TFT_ID_MAIN_THD, "00.00%");
+        TFT_UpdateText(TFT_PAGE_MAIN, TFT_ID_MAIN_VPP, "0.000 V");
+        TFT_UpdateText(TFT_PAGE_MAIN, TFT_ID_MAIN_F0,  "1.000kHz");
+        TFT_UpdateText(TFT_PAGE_MAIN, TFT_ID_MAIN_T,   "1.82s");
+        return;
+    }
+
     App_FmtThd(buf, gDebugTHDPercent);
     TFT_UpdateText(TFT_PAGE_MAIN, TFT_ID_MAIN_THD, buf);
 
@@ -553,37 +576,75 @@ static void App_RefreshHarmonicPage(void)
     TFT_UpdateText(TFT_PAGE_HARMONIC, TFT_ID_HARM_THD, buf);
 }
 
+/* Number of frames in the 10-second measurement window.
+ * At ~45 fps this is ~450 frames. */
+#define APP_MEASURE_SESSION_FRAMES   450U
+
 static void App_RunTftStateMachine(void)
 {
     uint8_t bs;
 
+    /* ----- "Start measurement" button (ID 16) on main page -----
+     * When pressed: start a fresh measurement session. The session runs
+     * for 10 seconds. During this window, page-switch buttons are ignored
+     * (per contest requirement: 期间不得有人工操作). */
+    if (TFT_ReadButton(TFT_PAGE_MAIN, TFT_ID_MAIN_BTN_MEASURE, &bs) &&
+        bs == TFT_BUTTON_PRESSED) {
+        gDebugMeasureSessionStart   = gDebugFrameCounter;
+        gDebugMeasureSessionFrames  = 0U;
+        gDebugMeasureSessionActive  = true;
+        gDebugMeasureSessionDone    = false;
+        /* Force main page so user sees the live measurement values */
+        TFT_SwitchPage(TFT_PAGE_MAIN);
+    }
+
+    /* Tick the session timer. */
+    if (gDebugMeasureSessionActive && !gDebugMeasureSessionDone) {
+        gDebugMeasureSessionFrames =
+            gDebugFrameCounter - gDebugMeasureSessionStart;
+        if (gDebugMeasureSessionFrames >= APP_MEASURE_SESSION_FRAMES) {
+            gDebugMeasureSessionDone  = true;
+            gDebugMeasureSessionActive = false;
+        }
+    }
+
+    /* ----- Refresh current page ----- */
     switch (TFT_GetCurrentPage()) {
     case TFT_PAGE_MAIN:
         App_RefreshMainPage();
-        if (TFT_ReadButton(TFT_PAGE_MAIN, TFT_ID_MAIN_BTN_WAVEFORM, &bs) && bs == TFT_BUTTON_PRESSED) {
-            TFT_SwitchPage(TFT_PAGE_WAVEFORM);
-        } else if (TFT_ReadButton(TFT_PAGE_MAIN, TFT_ID_MAIN_BTN_HARMONIC, &bs) && bs == TFT_BUTTON_PRESSED) {
-            TFT_SwitchPage(TFT_PAGE_HARMONIC);
+        /* Page switching is locked during the active 10-s measurement. */
+        if (!gDebugMeasureSessionActive) {
+            if (TFT_ReadButton(TFT_PAGE_MAIN, TFT_ID_MAIN_BTN_WAVEFORM, &bs) &&
+                bs == TFT_BUTTON_PRESSED) {
+                TFT_SwitchPage(TFT_PAGE_WAVEFORM);
+            } else if (TFT_ReadButton(TFT_PAGE_MAIN, TFT_ID_MAIN_BTN_HARMONIC, &bs) &&
+                       bs == TFT_BUTTON_PRESSED) {
+                TFT_SwitchPage(TFT_PAGE_HARMONIC);
+            }
         }
-        /* BTN_MEASURE (16): no-op — measurement runs continuously */
         break;
 
     case TFT_PAGE_WAVEFORM:
         App_RefreshWaveformPage();
-        if (TFT_ReadButton(TFT_PAGE_WAVEFORM, TFT_ID_WAVE_BTN_BACK, &bs) && bs == TFT_BUTTON_PRESSED) {
-            TFT_SwitchPage(TFT_PAGE_MAIN);
+        if (!gDebugMeasureSessionActive) {
+            if (TFT_ReadButton(TFT_PAGE_WAVEFORM, TFT_ID_WAVE_BTN_BACK, &bs) &&
+                bs == TFT_BUTTON_PRESSED) {
+                TFT_SwitchPage(TFT_PAGE_MAIN);
+            }
         }
         break;
 
     case TFT_PAGE_HARMONIC:
         App_RefreshHarmonicPage();
-        if (TFT_ReadButton(TFT_PAGE_HARMONIC, TFT_ID_HARM_BTN_BACK, &bs) && bs == TFT_BUTTON_PRESSED) {
-            TFT_SwitchPage(TFT_PAGE_MAIN);
+        if (!gDebugMeasureSessionActive) {
+            if (TFT_ReadButton(TFT_PAGE_HARMONIC, TFT_ID_HARM_BTN_BACK, &bs) &&
+                bs == TFT_BUTTON_PRESSED) {
+                TFT_SwitchPage(TFT_PAGE_MAIN);
+            }
         }
         break;
 
     default:
-        /* Unknown page; reset to main */
         TFT_SwitchPage(TFT_PAGE_MAIN);
         break;
     }
