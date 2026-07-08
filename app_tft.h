@@ -20,11 +20,15 @@
  *   Confirmed against the official debug tool screenshots:
  *     - Button write:  EE B1 10 00 00 00 01 00 FF FC FF FF
  *     - Button read :  EE B1 11 00 00 00 01    FF FC FF FF
- *   Text uses 0xB0 (text-display widget), waveform uses 0xB3 (curve widget). */
+ *   Widget classes:
+ *     - 0xB0 = text-display widget
+ *     - 0xB1 = button widget
+ *     - 0xB3 = curve/waveform widget
+ *     - 0xB5 = page variable (used for page switching) */
 #define TFT_WIDGET_TEXT             0xB0U
 #define TFT_WIDGET_BUTTON           0xB1U
 #define TFT_WIDGET_CURVE            0xB3U
-#define TFT_WIDGET_PAGE             0xB1U   /* also page via 0xB1 + subcommand */
+#define TFT_WIDGET_PAGE             0xB5U
 
 #define TFT_SUBCMD_WRITE            0x10U   /* write/update data */
 #define TFT_SUBCMD_READ             0x11U   /* read current value */

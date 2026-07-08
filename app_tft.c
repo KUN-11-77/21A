@@ -99,7 +99,7 @@ static uint16_t TFT_RingCount(void)
 
 /* =========================================================================
  * RX frame parser: walks ring buffer looking for 0xEE ... 0xFF FC FF FF
- * For 0xA1 responses, extracts (id_lo, id_hi, state) into sButtonState[id].
+ * Frame structure (no LEN byte): [0xEE] [WIDGET] [SUBCMD] [DATA...] [0xFF FC FF FF]
  * Drops malformed frames silently.
  * ========================================================================= */
 static void TFT_ParseRxFrames(void)
@@ -113,7 +113,8 @@ static void TFT_ParseRxFrames(void)
             continue;
         }
 
-        /* Look for frame tail 0xFF FC FF FF after the header */
+        /* Look for frame tail 0xFF FC FF FF after the 3-byte header
+         * (header + widget_class + subcmd). Search from index 3 onward. */
         uint16_t total = TFT_RingCount();
         uint16_t tailStart = 0xFFFFU;
         for (uint16_t i = 3U; i + 4U <= total; i++) {
@@ -132,30 +133,45 @@ static void TFT_ParseRxFrames(void)
             break;
         }
 
-        /* Read bytes 0xEE, LEN, CMD into local */
+        /* Compute dataLen from the tail position (no LEN byte in protocol).
+         *   bytes 0..2    = 0xEE, widget, subcmd
+         *   bytes 3..n    = data
+         *   bytes n..n+3  = 0xFF FC FF FF (tail) */
+        uint16_t headerLen = 3U;
+        uint16_t dataLen;
+        if (tailStart >= sRxTail) {
+            dataLen = (uint16_t)(tailStart - sRxTail - headerLen);
+        } else {
+            /* Wrapped around ring */
+            dataLen = (uint16_t)((TFT_RX_RING_SIZE - sRxTail - headerLen) + tailStart);
+        }
+
+        /* Sanity-cap data length to avoid reading garbage if tail was spurious */
+        if (dataLen > 16U) dataLen = 16U;
+
+        /* Consume header bytes (0xEE, widget_class, subcmd) */
         uint8_t b;
         (void) TFT_RingGet(&b);  /* 0xEE */
-        (void) TFT_RingGet(&b);  /* LEN */
-        uint8_t len = b;
-        (void) TFT_RingGet(&b);  /* CMD */
-        uint8_t cmd = b;
-        uint16_t dataLen = (uint16_t)(len - 1U);
+        (void) TFT_RingGet(&b);  /* widget_class */
+        uint8_t widgetClass = b;
+        (void) TFT_RingGet(&b);  /* subcmd */
+        uint8_t subCmd = b;
 
         /* Read data bytes */
-        uint8_t data[8];
-        for (uint16_t i = 0; i < dataLen && i < 8U; i++) {
+        uint8_t data[16];
+        for (uint16_t i = 0; i < dataLen; i++) {
             (void) TFT_RingGet(&data[i]);
         }
 
-        /* Read tail (4 bytes) */
+        /* Consume tail (4 bytes) */
         for (uint8_t i = 0; i < 4U; i++) {
             (void) TFT_RingGet(&b);
         }
 
         /* Handle button-state response:
-         *   frame body = [widget_class=B1] [subcmd=11] [page_hi] [page_lo] [id_hi] [id_lo] [state]
-         * i.e. data = [page_hi, page_lo, id_hi, id_lo, state] */
-        if (cmd == TFT_WIDGET_BUTTON && dataLen >= 5U && data[0] == TFT_SUBCMD_READ) {
+         *   data = [page_hi, page_lo, id_hi, id_lo, state] */
+        if (widgetClass == TFT_WIDGET_BUTTON && subCmd == TFT_SUBCMD_READ &&
+            dataLen >= 5U) {
             uint16_t id = (uint16_t)((data[2] << 8) | data[3]);
             uint8_t  st = data[4];
             if (id < TFT_BUTTON_TABLE_SIZE) {
