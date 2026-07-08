@@ -51,9 +51,13 @@ volatile bool gDebugAdcClipped;
 volatile bool gDebugResultValid;
 volatile uint32_t gDebugErrorFlags;
 volatile uint32_t gDebugFrameCounter;
+volatile uint32_t gDebugSampleMode;
+volatile bool gDebugAdaptiveLowModeUsed;
 
 static void App_RunMeasurementFrame(void);
+static void App_CaptureFrame(void);
 static void App_UpdateAdcWatchVariables(volatile uint16_t *adcBuffer);
+static bool App_ShouldRetryLowFrequencyMode(void);
 static void Debug_UpdateFftWatchVariables(void);
 static void Debug_UpdateResultStatus(void);
 static void Debug_BreakIfEnabled(void);
@@ -83,21 +87,42 @@ int main(void)
 
 static void App_RunMeasurementFrame(void)
 {
+    gDebugAdaptiveLowModeUsed = false;
+
 #if APP_ENABLE_SYNTHETIC_INPUT
     App_GenerateSyntheticInput(gSyntheticAdcSamples);
     gDebugAdcBuffer = gSyntheticAdcSamples;
 #else
-    ADC_DMA_Start();
-    ADC_DMA_WaitDone();
-    gDebugAdcBuffer = ADC_DMA_GetBuffer();
+    ADC_DMA_SetSampleMode(ADC_DMA_SAMPLE_MODE_HIGH_FREQ);
+    App_CaptureFrame();
 #endif
 
     App_UpdateAdcWatchVariables(gDebugAdcBuffer);
     FFT_Process(gDebugAdcBuffer);
+
+#if !APP_ENABLE_SYNTHETIC_INPUT
+#if APP_ENABLE_ADAPTIVE_SAMPLE_MODE
+    if (App_ShouldRetryLowFrequencyMode()) {
+        ADC_DMA_SetSampleMode(ADC_DMA_SAMPLE_MODE_LOW_FREQ);
+        App_CaptureFrame();
+        App_UpdateAdcWatchVariables(gDebugAdcBuffer);
+        FFT_Process(gDebugAdcBuffer);
+        gDebugAdaptiveLowModeUsed = true;
+    }
+#endif
+#endif
+
     Debug_UpdateFftWatchVariables();
     Debug_UpdateResultStatus();
 
     gDebugFrameCounter++;
+}
+
+static void App_CaptureFrame(void)
+{
+    ADC_DMA_Start();
+    ADC_DMA_WaitDone();
+    gDebugAdcBuffer = ADC_DMA_GetBuffer();
 }
 
 static void App_UpdateAdcWatchVariables(volatile uint16_t *adcBuffer)
@@ -128,8 +153,21 @@ static void App_UpdateAdcWatchVariables(volatile uint16_t *adcBuffer)
         (adcMax >= APP_ADC_CLIP_HIGH_THRESHOLD);
 }
 
+static bool App_ShouldRetryLowFrequencyMode(void)
+{
+    float measuredFreqHz = FFT_GetTimeDomainFrequencyHz();
+
+    if (measuredFreqHz <= 0.0f) {
+        measuredFreqHz = FFT_GetPeakFrequencyHz();
+    }
+
+    return (measuredFreqHz > 0.0f) &&
+           (measuredFreqHz < APP_ADAPTIVE_LOW_FREQ_THRESHOLD_HZ);
+}
+
 static void Debug_UpdateFftWatchVariables(void)
 {
+    gDebugSampleMode = (uint32_t) ADC_DMA_GetSampleMode();
     gDebugPeakBin = FFT_GetPeakBin();
     gDebugPeakFreqHz = FFT_GetPeakFrequencyHz();
     gDebugPeakAmpAdc = FFT_GetPeakAmplitudeAdc();

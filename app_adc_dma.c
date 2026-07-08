@@ -2,22 +2,28 @@
 #include "ti_msp_dl_config.h"
 
 /*
- * Fs = 32 MHz / (14 + 1) = 2.133333 MS/s.
- * This keeps the 10th harmonic of a 100 kHz fundamental below Nyquist.
+ * High mode: Fs = 32 MHz / (14 + 1) = 2.133333 MS/s. This keeps
+ * the 10th harmonic of a 100 kHz fundamental below Nyquist.
+ * Low mode uses the previously validated 1 kHz calibration.
  */
 #define ADC_DMA_TIMER_CLOCK_HZ 32000000.0f
-#define ADC_DMA_TIMER_LOAD_VALUE 14U
-#define ADC_DMA_SAMPLE_RATE_HZ \
-    (ADC_DMA_TIMER_CLOCK_HZ / ((float) (ADC_DMA_TIMER_LOAD_VALUE + 1U)))
+#define ADC_DMA_HIGH_TIMER_LOAD_VALUE 14U
+#define ADC_DMA_HIGH_SAMPLE_RATE_HZ \
+    (ADC_DMA_TIMER_CLOCK_HZ / ((float) (ADC_DMA_HIGH_TIMER_LOAD_VALUE + 1U)))
+#define ADC_DMA_LOW_TIMER_LOAD_VALUE 780U
+#define ADC_DMA_LOW_SAMPLE_RATE_HZ 41479.1f
 
 static volatile uint16_t gADCSamples[ADC_SAMPLE_SIZE];
 static volatile bool gADCDMADone = false;
+static ADC_DMA_SampleMode gADCSampleMode = ADC_DMA_SAMPLE_MODE_HIGH_FREQ;
+
+static uint32_t ADC_DMA_GetTimerLoadValueForMode(ADC_DMA_SampleMode mode);
+static void ADC_DMA_ApplySampleMode(void);
 
 void ADC_DMA_Init(void)
 {
-    DL_TimerA_stopCounter(TIMER_0_INST);
-    DL_TimerA_setLoadValue(TIMER_0_INST, ADC_DMA_TIMER_LOAD_VALUE);
-    DL_TimerA_setTimerCount(TIMER_0_INST, 0U);
+    gADCSampleMode = ADC_DMA_SAMPLE_MODE_HIGH_FREQ;
+    ADC_DMA_ApplySampleMode();
 
     DL_ADC12_disableConversions(ADC12_0_INST);
 
@@ -103,6 +109,7 @@ void ADC_DMA_Init(void)
 void ADC_DMA_Start(void)
 {
     gADCDMADone = false;
+    ADC_DMA_ApplySampleMode();
 
     /* Reload DMA state so each capture starts at the beginning of the frame. */
     DL_DMA_disableChannel(DMA, DMA_CH0_CHAN_ID);
@@ -146,6 +153,22 @@ bool ADC_DMA_IsDone(void)
     return gADCDMADone;
 }
 
+void ADC_DMA_SetSampleMode(ADC_DMA_SampleMode mode)
+{
+    if ((mode != ADC_DMA_SAMPLE_MODE_LOW_FREQ) &&
+        (mode != ADC_DMA_SAMPLE_MODE_HIGH_FREQ)) {
+        mode = ADC_DMA_SAMPLE_MODE_HIGH_FREQ;
+    }
+
+    gADCSampleMode = mode;
+    ADC_DMA_ApplySampleMode();
+}
+
+ADC_DMA_SampleMode ADC_DMA_GetSampleMode(void)
+{
+    return gADCSampleMode;
+}
+
 volatile uint16_t *ADC_DMA_GetBuffer(void)
 {
     return gADCSamples;
@@ -166,5 +189,27 @@ void ADC12_0_INST_IRQHandler(void)
 
 float ADC_DMA_GetSampleRateHz(void)
 {
-    return ADC_DMA_SAMPLE_RATE_HZ;
+    if (gADCSampleMode == ADC_DMA_SAMPLE_MODE_LOW_FREQ) {
+        return ADC_DMA_LOW_SAMPLE_RATE_HZ;
+    }
+
+    return ADC_DMA_HIGH_SAMPLE_RATE_HZ;
+}
+
+static uint32_t ADC_DMA_GetTimerLoadValueForMode(ADC_DMA_SampleMode mode)
+{
+    if (mode == ADC_DMA_SAMPLE_MODE_LOW_FREQ) {
+        return ADC_DMA_LOW_TIMER_LOAD_VALUE;
+    }
+
+    return ADC_DMA_HIGH_TIMER_LOAD_VALUE;
+}
+
+static void ADC_DMA_ApplySampleMode(void)
+{
+    DL_TimerA_stopCounter(TIMER_0_INST);
+    DL_TimerA_setLoadValue(
+        TIMER_0_INST,
+        ADC_DMA_GetTimerLoadValueForMode(gADCSampleMode));
+    DL_TimerA_setTimerCount(TIMER_0_INST, 0U);
 }

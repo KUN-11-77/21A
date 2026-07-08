@@ -129,6 +129,8 @@ Runtime mode macros are centralized in [app_config.h](app_config.h):
 - `APP_ENABLE_DEBUG_BREAK`: stop at `__BKPT(0)` after each processed frame.
 - `APP_ENABLE_CONTINUOUS_MEASUREMENT`: repeat capture and FFT processing frames.
 - `APP_ENABLE_SYNTHETIC_INPUT`: bypass ADC/DMA and generate a synthetic 1 kHz test frame with controlled harmonics.
+- `APP_ENABLE_ADAPTIVE_SAMPLE_MODE`: start in high-speed mode and retry low-speed mode when the coarse frequency is below `APP_ADAPTIVE_LOW_FREQ_THRESHOLD_HZ`.
+- `APP_ADAPTIVE_LOW_FREQ_THRESHOLD_HZ`: defaults to `4000 Hz`, so 1 kHz/3 kHz use the low-speed path and 5 kHz through 100 kHz stay on the high-speed path.
 
 Useful runtime checks:
 
