@@ -170,7 +170,7 @@ static void TFT_ParseRxFrames(void)
 
         /* Handle button-state response:
          *   data = [page_hi, page_lo, id_hi, id_lo, state] */
-        if (widgetClass == TFT_WIDGET_BUTTON && subCmd == TFT_SUBCMD_READ &&
+        if (widgetClass == TFT_WIDGET && subCmd == TFT_SUBCMD_READ &&
             dataLen >= 5U) {
             uint16_t id = (uint16_t)((data[2] << 8) | data[3]);
             uint8_t  st = data[4];
@@ -188,7 +188,7 @@ static void TFT_RequestButtonState(uint8_t pageId, uint16_t controlId)
     uint8_t data[4];
     /* Format: [page_hi] [page_lo] [id_hi] [id_lo] */
     TFT_EncodePageAndId(data, pageId, controlId);
-    TFT_TxFrame(TFT_WIDGET_BUTTON, TFT_SUBCMD_READ, data, 4U);
+    TFT_TxFrame(TFT_WIDGET, TFT_SUBCMD_READ, data, 4U);
 }
 
 /* =========================================================================
@@ -241,9 +241,9 @@ void TFT_Init(void)
 
 void TFT_SwitchPage(uint8_t pageId)
 {
-    /* Page widget: B1 + subcommand, data = page_hi page_lo */
-    uint8_t data[2] = { 0x00U, pageId };
-    TFT_TxFrame(TFT_WIDGET_PAGE, TFT_SUBCMD_WRITE, data, 2U);
+    /* Page switch: EE B1 00 00 00 FF FC FF FF (data = page_id, 1 byte) */
+    uint8_t data = pageId;
+    TFT_TxFrame(TFT_WIDGET, TFT_SUBCMD_PAGE, &data, 1U);
     sCurrentPage = pageId;
 }
 
@@ -266,7 +266,7 @@ void TFT_UpdateText(uint8_t pageId, uint16_t controlId, const char *text)
         data[idx] = (uint8_t) text[idx - 4U];
         idx++;
     }
-    TFT_TxFrame(TFT_WIDGET_TEXT, TFT_SUBCMD_WRITE, data, idx);
+    TFT_TxFrame(TFT_WIDGET, TFT_SUBCMD_WRITE, data, idx);
 }
 
 void TFT_UpdateWaveform(uint8_t pageId, uint16_t controlId,
@@ -290,7 +290,12 @@ void TFT_UpdateWaveform(uint8_t pageId, uint16_t controlId,
         data[idx++] = (uint8_t)(v & 0xFFU);
         data[idx++] = (uint8_t)((v >> 8) & 0xFFU);
     }
-    TFT_TxFrame(TFT_WIDGET_CURVE, TFT_SUBCMD_WRITE, data, idx);
+    /* Curve/waveform: same 0xB1 widget, but format has different data.
+     * Best-guess subcommand for curve append: 0x30 (unverified — see TODO).
+     * Confirmed by debug tool: EE B1 ?? 00 00 00 01 00 [data...] FF FC FF FF
+     * where ?? is the curve subcommand. The '已发送指令' field in the
+     * curve section was empty in the debug tool screenshot, so this is a guess. */
+    TFT_TxFrame(TFT_WIDGET, 0x30U, data, idx);
 }
 
 bool TFT_ReadButton(uint8_t pageId, uint16_t controlId, uint8_t *stateOut)

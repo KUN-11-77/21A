@@ -15,23 +15,29 @@
 #define TFT_FRAME_TAIL2             0xFFU
 #define TFT_FRAME_TAIL3             0xFFU
 
-/* Dacai (DWIN) basic protocol — widget class byte + operation subcommand.
- *   Frame: [0xEE] [CLASS] [SUBCMD] [PAGE_HI] [PAGE_LO] [ID_HI] [ID_LO] [DATA...] [0xFF 0xFC 0xFF 0xFF]
- *   Confirmed against the official debug tool screenshots:
- *     - Button write:  EE B1 10 00 00 00 01 00 FF FC FF FF
- *     - Button read :  EE B1 11 00 00 00 01    FF FC FF FF
- *   Widget classes:
- *     - 0xB0 = text-display widget
- *     - 0xB1 = button widget
- *     - 0xB3 = curve/waveform widget
- *     - 0xB5 = page variable (used for page switching) */
-#define TFT_WIDGET_TEXT             0xB0U
-#define TFT_WIDGET_BUTTON           0xB1U
-#define TFT_WIDGET_CURVE            0xB3U
-#define TFT_WIDGET_PAGE             0xB5U
+/* Dacai (DWIN) basic protocol — confirmed against official debug tool.
+ *   Frame: [0xEE] [0xB1] [SUBCMD] [PAGE_HI] [PAGE_LO] [ID_HI] [ID_LO] [DATA...] [0xFF 0xFC 0xFF 0xFF]
+ *   ALL widgets (text, button, curve, page) use widget class 0xB1.
+ *   The subcommand identifies the operation:
+ *     - 0x00 = page switch    (data: page_id)
+ *     - 0x10 = write (text/button state)
+ *     - 0x11 = read
+ *     - 0x07 = formatted text display
+ *     - 0x15 = text blink period
+ *     - 0x16 = text scroll speed
+ *     - 0x17 = text background transparent
+ *     - 0x1A = increment adjustment
+ *   Confirmed frames:
+ *     - Button write : EE B1 10 00 00 00 01 00 FF FC FF FF
+ *     - Button read  : EE B1 11 00 00 00 01    FF FC FF FF
+ *     - Page switch  : EE B1 00 00 00          FF FC FF FF
+ *     - Text update  : EE B1 10 00 00 00 01 [text...] FF FC FF FF */
+#define TFT_WIDGET                  0xB1U   /* All widgets use 0xB1 */
 
-#define TFT_SUBCMD_WRITE            0x10U   /* write/update data */
-#define TFT_SUBCMD_READ             0x11U   /* read current value */
+#define TFT_SUBCMD_PAGE             0x00U   /* page switch */
+#define TFT_SUBCMD_FORMAT           0x07U   /* formatted text display */
+#define TFT_SUBCMD_WRITE            0x10U   /* write text / button state */
+#define TFT_SUBCMD_READ             0x11U   /* read text / button state */
 
 #define TFT_BUTTON_PRESSED          0x01U
 #define TFT_BUTTON_RELEASED         0x00U
