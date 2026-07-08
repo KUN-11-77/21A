@@ -116,13 +116,27 @@ The current application configures:
 
 - ADC0, channel 0, input pin `PA27`
 - DMA channel 0
-- 1024 half-word samples into `gADCSamples`
+- 40.96 kHz timer-paced sampling from `TIMER_0`
+- 2048 half-word samples into `gADCSamples`
+- 2048-point CMSIS-DSP CFFT with 20 Hz bin spacing
+- H1 through H10 extraction around the expected 1 kHz harmonic bins
+- THD percentage exported through debug watch variables
+- ADC min/max/mean and clipping diagnostics
+- Result-valid and error-flag diagnostics for field debugging
+
+Runtime mode macros are centralized in [app_config.h](app_config.h):
+
+- `APP_ENABLE_DEBUG_BREAK`: stop at `__BKPT(0)` after each processed frame.
+- `APP_ENABLE_CONTINUOUS_MEASUREMENT`: repeat capture and FFT processing frames.
+- `APP_ENABLE_SYNTHETIC_INPUT`: bypass ADC/DMA and generate a synthetic 1 kHz test frame with controlled harmonics.
 
 Useful runtime checks:
 
 - Set a breakpoint at `__BKPT(0)` in [cmsis_dsp_empty.c](cmsis_dsp_empty.c). Reaching it means the DMA-done path set `gADCDMADone = true`.
-- Watch `gADCSamples[0..1023]` in CCS Expressions/Memory Browser.
-- Watch `gADCDMADone`; it should become `true` after the DMA completion interrupt.
+- Watch `gADCSamples[0..2047]` in CCS Expressions/Memory Browser.
+- Watch `gDebugAdcMin`, `gDebugAdcMax`, `gDebugAdcMean`, and `gDebugAdcClipped` to verify front-end bias, amplitude, and clipping margin.
+- Watch `gDebugResultValid` and `gDebugErrorFlags`; `gDebugResultValid` should be `true` for a usable THD result.
+- Watch `gDebugH1Bin`; with a clean 1 kHz sine, it should be close to bin 50.
 
 DSLite can also read hardware registers directly. Examples:
 
@@ -194,7 +208,7 @@ Difficulties:
 
 Next step:
 
-- ADC+DMA is validated with `TIMER_0` event-triggered sampling and a frozen 1024-sample frame. Next, add the CMSIS-DSP FFT processing path over `gADCSamples` after `gADCDMADone` becomes true.
+- The formal firmware path is now `TIMER_0` event-triggered ADC sampling at 40.96 kHz, a frozen 2048-sample DMA frame, 2048-point CMSIS-DSP CFFT, H1-H10 extraction, and THD calculation. Next, validate `H1Bin ~= 50` with a clean 1 kHz sine input, then validate THD with controlled harmonic test signals.
 
 ## Action Log
 

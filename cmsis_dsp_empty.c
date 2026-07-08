@@ -1,151 +1,230 @@
-/*
- * Copyright (c) 2021, Texas Instruments Incorporated
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- * *  Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- *
- * *  Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- *
- * *  Neither the name of Texas Instruments Incorporated nor the names of
- *    its contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
- * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
- * THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR
- * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
- * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
- * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
- * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
- * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
- * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
- * EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- */
-
-#include "arm_math.h"
+#include "app_adc_dma.h"
+#include "app_config.h"
+#include "app_fft.h"
 #include "ti_msp_dl_config.h"
-#include <stdint.h>
-#include <stdbool.h>
 
-#define ADC_SAMPLE_SIZE 1024
+#if APP_ENABLE_SYNTHETIC_INPUT
+#include "arm_math.h"
+#endif
 
-volatile uint16_t gADCSamples[ADC_SAMPLE_SIZE];
-volatile bool gADCDMADone = false;
+volatile uint16_t *gDebugAdcBuffer;
+const float * volatile gDebugFftMag;
+
+volatile uint32_t gDebugPeakBin;
+volatile float gDebugPeakFreqHz;
+volatile float gDebugPeakAmpAdc;
+volatile float gDebugPeakAmpVolt;
+
+volatile uint32_t gDebugBaseBin;
+volatile float gDebugBaseFreqHz;
+volatile float gDebugTimeFreqHz;
+
+volatile float gDebugTHDPercent;
+
+volatile float gDebugH1Volt;
+volatile float gDebugH2Volt;
+volatile float gDebugH3Volt;
+volatile float gDebugH4Volt;
+volatile float gDebugH5Volt;
+volatile float gDebugH6Volt;
+volatile float gDebugH7Volt;
+volatile float gDebugH8Volt;
+volatile float gDebugH9Volt;
+volatile float gDebugH10Volt;
+
+volatile uint32_t gDebugH1Bin;
+volatile uint32_t gDebugH2Bin;
+volatile uint32_t gDebugH3Bin;
+volatile uint32_t gDebugH4Bin;
+volatile uint32_t gDebugH5Bin;
+volatile uint32_t gDebugH6Bin;
+volatile uint32_t gDebugH7Bin;
+volatile uint32_t gDebugH8Bin;
+volatile uint32_t gDebugH9Bin;
+volatile uint32_t gDebugH10Bin;
+
+volatile uint16_t gDebugAdcMin;
+volatile uint16_t gDebugAdcMax;
+volatile float gDebugAdcMean;
+volatile bool gDebugAdcClipped;
+
+volatile bool gDebugResultValid;
+volatile uint32_t gDebugErrorFlags;
+volatile uint32_t gDebugFrameCounter;
+
+static void App_RunMeasurementFrame(void);
+static void App_UpdateAdcWatchVariables(volatile uint16_t *adcBuffer);
+static void Debug_UpdateFftWatchVariables(void);
+static void Debug_UpdateResultStatus(void);
+static void Debug_BreakIfEnabled(void);
+
+#if APP_ENABLE_SYNTHETIC_INPUT
+static volatile uint16_t gSyntheticAdcSamples[ADC_SAMPLE_SIZE];
+static void App_GenerateSyntheticInput(volatile uint16_t *adcBuffer);
+#endif
 
 int main(void)
 {
     SYSCFG_DL_init();
 
-    /*
-     * FFT input needs fixed sample spacing, so ADC0 is triggered by TIMER_0
-     * events. Each timer zero event starts one ADC conversion, and DMA collects
-     * 1024 half-word samples before the ADC DMA_DONE interrupt fires.
-     */
-    DL_ADC12_disableConversions(ADC12_0_INST);
-    DL_ADC12_initSingleSample(ADC12_0_INST,
-        DL_ADC12_REPEAT_MODE_ENABLED,
-        DL_ADC12_SAMPLING_SOURCE_AUTO,
-        DL_ADC12_TRIG_SRC_EVENT,
-        DL_ADC12_SAMP_CONV_RES_12_BIT,
-        DL_ADC12_SAMP_CONV_DATA_FORMAT_UNSIGNED);
-    DL_ADC12_configConversionMem(ADC12_0_INST, ADC12_0_ADCMEM_0,
-        DL_ADC12_INPUT_CHAN_0,
-        DL_ADC12_REFERENCE_VOLTAGE_VDDA,
-        DL_ADC12_SAMPLE_TIMER_SOURCE_SCOMP0,
-        DL_ADC12_AVERAGING_MODE_DISABLED,
-        DL_ADC12_BURN_OUT_SOURCE_DISABLED,
-        DL_ADC12_TRIGGER_MODE_AUTO_NEXT,
-        DL_ADC12_WINDOWS_COMP_MODE_DISABLED);
-    DL_ADC12_setSubscriberChanID(ADC12_0_INST, ADC12_0_INST_SUB_CH);
-    DL_ADC12_enableConversions(ADC12_0_INST);
+#if !APP_ENABLE_SYNTHETIC_INPUT
+    ADC_DMA_Init();
+#endif
 
-    DL_TimerA_enableEvent(
-        TIMER_0_INST, DL_TIMERA_EVENT_ROUTE_1, DL_TIMERA_EVENT_ZERO_EVENT);
-    DL_TimerA_setPublisherChanID(
-        TIMER_0_INST, DL_TIMERA_PUBLISHER_INDEX_0, ADC12_0_INST_SUB_CH);
-
-    /*
-     * DMA 源地址：ADC MEMRES0
-     */
-    DL_DMA_disableChannel(DMA, DMA_CH0_CHAN_ID);
-    DL_DMA_setTransferMode(
-        DMA, DMA_CH0_CHAN_ID, DL_DMA_SINGLE_TRANSFER_MODE);
-
-    DL_DMA_setSrcAddr(
-        DMA,
-        DMA_CH0_CHAN_ID,
-        (uint32_t) DL_ADC12_getMemResultAddress(ADC12_0_INST, DL_ADC12_MEM_IDX_0)
-    );
-
-    /*
-     * DMA 目的地址：采样 buffer
-     */
-    DL_DMA_setDestAddr(
-        DMA,
-        DMA_CH0_CHAN_ID,
-        (uint32_t) &gADCSamples[0]
-    );
-
-    /*
-     * DMA 传输长度：1024 点
-     */
-    DL_DMA_setTransferSize(
-        DMA,
-        DMA_CH0_CHAN_ID,
-        ADC_SAMPLE_SIZE
-    );
-
-    /*
-     * 使能 DMA channel
-     */
-    DL_DMA_enableChannel(DMA, DMA_CH0_CHAN_ID);
-
-    /*
-     * 开 ADC 中断，用来接收 DMA_DONE
-     */
-    DL_ADC12_clearInterruptStatus(ADC12_0_INST, DL_ADC12_INTERRUPT_DMA_DONE);
-    DL_ADC12_enableInterrupt(ADC12_0_INST, DL_ADC12_INTERRUPT_DMA_DONE);
-    NVIC_EnableIRQ(ADC12_0_INST_INT_IRQN);
-
-    gADCDMADone = false;
-
-    DL_ADC12_enableDMA(ADC12_0_INST);
-    DL_TimerA_startCounter(TIMER_0_INST);
-
-    while (gADCDMADone == false) {
-        __WFE();
-    }
-
-    /*
-     * 程序运行到这里，gADCSamples 里应该已经有 1024 个 ADC 数据。
-     * 可以打断点观察数组。
-     */
-    __BKPT(0);
+    do {
+        App_RunMeasurementFrame();
+        Debug_BreakIfEnabled();
+    } while (APP_ENABLE_CONTINUOUS_MEASUREMENT != 0);
 
     while (1) {
         __WFI();
     }
 }
 
-void ADC12_0_INST_IRQHandler(void)
+static void App_RunMeasurementFrame(void)
 {
-    switch (DL_ADC12_getPendingInterrupt(ADC12_0_INST)) {
-        case DL_ADC12_IIDX_DMA_DONE:
-            DL_TimerA_stopCounter(TIMER_0_INST);
-            DL_DMA_disableChannel(DMA, DMA_CH0_CHAN_ID);
-            DL_ADC12_disableDMA(ADC12_0_INST);
-            gADCDMADone = true;
-            break;
+#if APP_ENABLE_SYNTHETIC_INPUT
+    App_GenerateSyntheticInput(gSyntheticAdcSamples);
+    gDebugAdcBuffer = gSyntheticAdcSamples;
+#else
+    ADC_DMA_Start();
+    ADC_DMA_WaitDone();
+    gDebugAdcBuffer = ADC_DMA_GetBuffer();
+#endif
 
-        default:
-            break;
+    App_UpdateAdcWatchVariables(gDebugAdcBuffer);
+    FFT_Process(gDebugAdcBuffer);
+    Debug_UpdateFftWatchVariables();
+    Debug_UpdateResultStatus();
+
+    gDebugFrameCounter++;
+}
+
+static void App_UpdateAdcWatchVariables(volatile uint16_t *adcBuffer)
+{
+    uint16_t adcMin = UINT16_MAX;
+    uint16_t adcMax = 0U;
+    uint32_t sum = 0U;
+
+    for (uint32_t i = 0U; i < ADC_SAMPLE_SIZE; i++) {
+        uint16_t sample = adcBuffer[i];
+
+        if (sample < adcMin) {
+            adcMin = sample;
+        }
+
+        if (sample > adcMax) {
+            adcMax = sample;
+        }
+
+        sum += sample;
+    }
+
+    gDebugAdcMin = adcMin;
+    gDebugAdcMax = adcMax;
+    gDebugAdcMean = ((float) sum) / ((float) ADC_SAMPLE_SIZE);
+    gDebugAdcClipped =
+        (adcMin <= APP_ADC_CLIP_LOW_THRESHOLD) ||
+        (adcMax >= APP_ADC_CLIP_HIGH_THRESHOLD);
+}
+
+static void Debug_UpdateFftWatchVariables(void)
+{
+    gDebugPeakBin = FFT_GetPeakBin();
+    gDebugPeakFreqHz = FFT_GetPeakFrequencyHz();
+    gDebugPeakAmpAdc = FFT_GetPeakAmplitudeAdc();
+    gDebugPeakAmpVolt = FFT_GetPeakAmplitudeVolt();
+    gDebugBaseBin = FFT_GetBaseBin();
+    gDebugBaseFreqHz = FFT_GetBaseFrequencyHz();
+    gDebugTimeFreqHz = FFT_GetTimeDomainFrequencyHz();
+    gDebugFftMag = FFT_GetMagnitudeBuffer();
+    gDebugTHDPercent = FFT_GetTHDPercent();
+
+    gDebugH1Volt = FFT_GetHarmonicAmplitudeVolt(1);
+    gDebugH2Volt = FFT_GetHarmonicAmplitudeVolt(2);
+    gDebugH3Volt = FFT_GetHarmonicAmplitudeVolt(3);
+    gDebugH4Volt = FFT_GetHarmonicAmplitudeVolt(4);
+    gDebugH5Volt = FFT_GetHarmonicAmplitudeVolt(5);
+    gDebugH6Volt = FFT_GetHarmonicAmplitudeVolt(6);
+    gDebugH7Volt = FFT_GetHarmonicAmplitudeVolt(7);
+    gDebugH8Volt = FFT_GetHarmonicAmplitudeVolt(8);
+    gDebugH9Volt = FFT_GetHarmonicAmplitudeVolt(9);
+    gDebugH10Volt = FFT_GetHarmonicAmplitudeVolt(10);
+
+    gDebugH1Bin = FFT_GetHarmonicBin(1);
+    gDebugH2Bin = FFT_GetHarmonicBin(2);
+    gDebugH3Bin = FFT_GetHarmonicBin(3);
+    gDebugH4Bin = FFT_GetHarmonicBin(4);
+    gDebugH5Bin = FFT_GetHarmonicBin(5);
+    gDebugH6Bin = FFT_GetHarmonicBin(6);
+    gDebugH7Bin = FFT_GetHarmonicBin(7);
+    gDebugH8Bin = FFT_GetHarmonicBin(8);
+    gDebugH9Bin = FFT_GetHarmonicBin(9);
+    gDebugH10Bin = FFT_GetHarmonicBin(10);
+}
+
+static void Debug_UpdateResultStatus(void)
+{
+    uint32_t errorFlags = APP_RESULT_ERROR_NONE;
+
+#if !APP_ENABLE_SYNTHETIC_INPUT
+    if (!ADC_DMA_IsDone()) {
+        errorFlags |= APP_RESULT_ERROR_DMA_NOT_DONE;
+    }
+#endif
+
+    if (gDebugAdcClipped) {
+        errorFlags |= APP_RESULT_ERROR_ADC_CLIPPED;
+    }
+
+    if (!FFT_IsFundamentalValid()) {
+        errorFlags |= APP_RESULT_ERROR_FUNDAMENTAL_LOW;
+    }
+
+    uint32_t expectedH1Bin = FFT_GetBaseBin();
+    uint32_t measuredH1Bin = FFT_GetHarmonicBin(1U);
+    uint32_t binTolerance = FFT_GetHarmonicSearchHalfWidth();
+
+    if ((measuredH1Bin + binTolerance < expectedH1Bin) ||
+        (measuredH1Bin > expectedH1Bin + binTolerance)) {
+        errorFlags |= APP_RESULT_ERROR_H1_BIN_OUT_OF_RANGE;
+    }
+
+    gDebugErrorFlags = errorFlags;
+    gDebugResultValid = (errorFlags == APP_RESULT_ERROR_NONE);
+}
+
+static void Debug_BreakIfEnabled(void)
+{
+#if APP_ENABLE_DEBUG_BREAK
+    __BKPT(0);
+#endif
+}
+
+#if APP_ENABLE_SYNTHETIC_INPUT
+static void App_GenerateSyntheticInput(volatile uint16_t *adcBuffer)
+{
+    const float dcOffset = 2048.0f;
+    const float fundamentalAmp = 800.0f;
+    const float h2Ratio = 0.10f;
+    const float h3Ratio = 0.05f;
+    const float twoPi = 6.28318530718f;
+
+    for (uint32_t i = 0U; i < ADC_SAMPLE_SIZE; i++) {
+        float phase = twoPi * ((float) i) / 40.96f;
+        float sample =
+            dcOffset +
+            fundamentalAmp * arm_sin_f32(phase) +
+            fundamentalAmp * h2Ratio * arm_sin_f32(2.0f * phase) +
+            fundamentalAmp * h3Ratio * arm_sin_f32(3.0f * phase);
+
+        if (sample < 0.0f) {
+            sample = 0.0f;
+        } else if (sample > APP_ADC_FULL_SCALE) {
+            sample = APP_ADC_FULL_SCALE;
+        }
+
+        adcBuffer[i] = (uint16_t) (sample + 0.5f);
     }
 }
+#endif
